@@ -107,6 +107,17 @@ async function handleTelegram(request, env) {
   return new Response("ok");
 }
 
+// Открыть один раз в браузере: /setup — привязывает бота к этому Worker и добавляет /list в меню.
+async function handleSetup(url, env) {
+  const hook = await (await tg(env, "setWebhook", { url: `${url.origin}/tg`, allowed_updates: ["message"] })).json();
+  await tg(env, "setMyCommands", { commands: [{ command: "list", description: "Все заявки списком и таблицей" }] });
+  const ok = hook.ok === true;
+  const text = ok
+    ? "Готово! Бот подключён. Напишите ему /list."
+    : `Ошибка: ${hook.description || "неизвестно"}. Проверьте TELEGRAM_TOKEN в настройках Worker.`;
+  return new Response(text, { status: ok ? 200 : 500, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+}
+
 async function handleForm(request, env) {
   let data;
   try { data = await request.json(); } catch { return json({ error: "bad json" }, 400, env); }
@@ -143,6 +154,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === "OPTIONS") return new Response(null, { headers: cors(env) });
+    if (request.method === "GET" && url.pathname === "/setup") return handleSetup(url, env);
     if (request.method !== "POST") return json({ error: "method" }, 405, env);
     if (url.pathname === "/tg") return handleTelegram(request, env);
     return handleForm(request, env);
