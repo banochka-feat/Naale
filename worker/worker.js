@@ -56,7 +56,7 @@ function toCsv(items) {
   const rows = [["№", "Имя", "Куда / к кому", "С", "По", "Комментарий", "Отправлено"]];
   items.forEach((t, i) => rows.push([i + 1, t.name, t.destination, formatDate(t.from), formatDate(t.to), t.comment, formatStamp(t.created)]));
   // BOM + точка с запятой — чтобы русский Excel открыл файл правильно
-  return "﻿" + rows.map((r) => r.map(cell).join(";")).join("\r\n");
+  return "\uFEFF" + rows.map((r) => r.map(cell).join(";")).join("\r\n");
 }
 
 async function sendList(env) {
