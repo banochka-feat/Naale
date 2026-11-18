@@ -91,30 +91,50 @@ async function sendList(env) {
   return fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendDocument`, { method: "POST", body: form });
 }
 
-async function handleTelegram(request, env) {
-  let update;
-  try { update = await request.json(); } catch { return new Response("ok"); }
-  const msg = update.message;
+async function handleUpdate(update, env) {
+  const msg = update && update.message;
   // Отвечаем только вам; ответ всегда уходит в ваш чат, чужим ничего не отправляется
-  if (msg && String(msg.chat?.id) === String(env.TELEGRAM_CHAT_ID)) {
-    const text = (msg.text || "").trim();
-    if (/^\/(list|table|spisok)\b/.test(text)) {
-      await sendList(env);
-    } else if (/^\/start\b/.test(text) || /^\/help\b/.test(text)) {
-      await tg(env, "sendMessage", { chat_id: env.TELEGRAM_CHAT_ID, text: "Новые заявки приходят сюда автоматически.\n/list — все заявки списком и таблицей." });
-    }
+  if (!msg || String(msg.chat?.id) !== String(env.TELEGRAM_CHAT_ID)) return;
+  const text = (msg.text || "").trim();
+  if (/^\/(list|table|spisok)\b/.test(text)) {
+    await sendList(env);
+  } else if (/^\/(start|help)\b/.test(text)) {
+    await tg(env, "sendMessage", { chat_id: env.TELEGRAM_CHAT_ID, text: "Новые заявки приходят сюда автоматически.\n/list — все заявки списком и таблицей." });
   }
+}
+
+async function handleTelegram(request, env) {
+  try { await handleUpdate(await request.json(), env); } catch {}
   return new Response("ok");
 }
 
-// Открыть один раз в браузере: /setup — привязывает бота к этому Worker и добавляет /list в меню.
-async function handleSetup(url, env) {
-  const hook = await (await tg(env, "setWebhook", { url: `${url.origin}/tg`, allowed_updates: ["message"] })).json();
+// Забираем команды у Telegram сами (getUpdates). Запускается Cron-триггером раз в минуту
+// и ~50 секунд ждёт новые сообщения, поэтому бот отвечает почти сразу.
+async function pollTelegram(env) {
+  if (!env.DB) return;
+  const until = Date.now() + 50000;
+  while (Date.now() < until) {
+    const offset = Number(await env.DB.get("tg_offset")) || 0;
+    const wait = Math.max(1, Math.min(25, Math.floor((until - Date.now()) / 1000)));
+    const res = await tg(env, "getUpdates", { offset, timeout: wait, allowed_updates: ["message"] });
+    if (!res.ok) return; // например, 409 — уже работает другой запуск
+    const data = await res.json();
+    for (const update of data.result || []) {
+      await env.DB.put("tg_offset", String(update.update_id + 1));
+      try { await handleUpdate(update, env); } catch {}
+    }
+  }
+}
+
+// Открыть один раз в браузере: /setup — отключает webhook (команды забирает сам Worker)
+// и добавляет /list в меню бота.
+async function handleSetup(env) {
+  const del = await (await tg(env, "deleteWebhook", {})).json();
   await tg(env, "setMyCommands", { commands: [{ command: "list", description: "Все заявки списком и таблицей" }] });
-  const ok = hook.ok === true;
+  const ok = del.ok === true;
   const text = ok
-    ? "Готово! Бот подключён. Напишите ему /list."
-    : `Ошибка: ${hook.description || "неизвестно"}. Проверьте TELEGRAM_TOKEN в настройках Worker.`;
+    ? "Готово! Бот подключён. Напишите ему /list (ответ придёт в течение минуты)."
+    : `Ошибка Telegram: ${del.description || "неизвестно"}`;
   return new Response(text, { status: ok ? 200 : 500, headers: { "Content-Type": "text/plain; charset=utf-8" } });
 }
 
@@ -154,9 +174,12 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === "OPTIONS") return new Response(null, { headers: cors(env) });
-    if (request.method === "GET" && url.pathname === "/setup") return handleSetup(url, env);
+    if (request.method === "GET" && url.pathname === "/setup") return handleSetup(env);
     if (request.method !== "POST") return json({ error: "method" }, 405, env);
     if (url.pathname === "/tg") return handleTelegram(request, env);
     return handleForm(request, env);
+  },
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(pollTelegram(env));
   },
 };

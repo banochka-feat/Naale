@@ -53,9 +53,8 @@ Worker сохраняет каждую заявку в хранилище Cloudf
 1. Cloudflare → **Storage & Databases → KV** («Хранилище и базы данных → KV») → **Create** → имя `naale-trips`.
 2. Worker → **Settings → Bindings** («Привязки») → **Add** → **KV namespace**: имя переменной `DB`, хранилище `naale-trips` → Deploy.
 3. Замените код Worker на новый [`worker/worker.js`](worker/worker.js) → Deploy.
-4. Один раз откройте в браузере (подставьте токен):
-   `https://api.telegram.org/botТОКЕН/setWebhook?url=https://naale-form.mixailzhdanov375.workers.dev/tg`
-   Должно ответить `"ok":true`.
-5. Напишите боту `/list`.
+4. Worker → **Настройки → Триггеры → Cron-триггеры** → добавить расписание `* * * * *` (каждую минуту).
+5. Один раз откройте `https://naale-form.mixailzhdanov375.workers.dev/setup` — должно ответить «Готово!».
+6. Напишите боту `/list` (ответ придёт в течение минуты).
 
 Бот отвечает на команды только из вашего чата (`TELEGRAM_CHAT_ID`).
