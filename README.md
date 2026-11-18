@@ -43,3 +43,19 @@ window.FORM_ENDPOINT = "https://naale-form.<логин>.workers.dev";
 
 ## Проверка
 Откройте сайт, отправьте тестовую заявку — через секунду она придёт в Telegram.
+
+## Таблица всех заявок (команда /list)
+
+Worker сохраняет каждую заявку в хранилище Cloudflare KV. Если написать боту `/list`,
+он пришлёт все заявки списком и файлом `zayavki.csv` (открывается в Excel / Google Таблицах).
+
+Настройка:
+1. Cloudflare → **Storage & Databases → KV** («Хранилище и базы данных → KV») → **Create** → имя `naale-trips`.
+2. Worker → **Settings → Bindings** («Привязки») → **Add** → **KV namespace**: имя переменной `DB`, хранилище `naale-trips` → Deploy.
+3. Замените код Worker на новый [`worker/worker.js`](worker/worker.js) → Deploy.
+4. Один раз откройте в браузере (подставьте токен):
+   `https://api.telegram.org/botТОКЕН/setWebhook?url=https://naale-form.mixailzhdanov375.workers.dev/tg`
+   Должно ответить `"ok":true`.
+5. Напишите боту `/list`.
+
+Бот отвечает на команды только из вашего чата (`TELEGRAM_CHAT_ID`).
