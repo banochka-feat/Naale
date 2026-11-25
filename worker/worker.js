@@ -91,6 +91,33 @@ async function sendList(env) {
   return fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendDocument`, { method: "POST", body: form });
 }
 
+async function clearAll(env) {
+  let cursor, count = 0;
+  do {
+    const page = await env.DB.list({ prefix: "trip:", cursor });
+    await Promise.all(page.keys.map((k) => env.DB.delete(k.name)));
+    count += page.keys.length;
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return count;
+}
+
+// Сброс: сначала присылаем итоговую таблицу (чтобы ничего не потерять), потом очищаем.
+async function resetList(env) {
+  const chat = env.TELEGRAM_CHAT_ID;
+  if (!env.DB) return tg(env, "sendMessage", { chat_id: chat, text: "Хранилище не подключено." });
+  const items = await loadAll(env);
+  if (!items.length) return tg(env, "sendMessage", { chat_id: chat, text: "Список и так пустой." });
+  const form = new FormData();
+  form.append("chat_id", chat);
+  form.append("caption", `Итоговая таблица перед сбросом. Всего заявок: ${items.length}`);
+  form.append("document", new Blob([toCsv(items)], { type: "text/csv" }), "zayavki-arhiv.csv");
+  const sent = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendDocument`, { method: "POST", body: form });
+  if (!sent.ok) return tg(env, "sendMessage", { chat_id: chat, text: "Не удалось отправить архив, список НЕ очищен. Попробуйте ещё раз." });
+  await clearAll(env);
+  return tg(env, "sendMessage", { chat_id: chat, text: "🧹 Список очищен. Новые заявки начнут новый список." });
+}
+
 async function handleUpdate(update, env) {
   const msg = update && update.message;
   // Отвечаем только вам; ответ всегда уходит в ваш чат, чужим ничего не отправляется
@@ -98,8 +125,12 @@ async function handleUpdate(update, env) {
   const text = (msg.text || "").trim();
   if (/^\/(list|table|spisok)\b/.test(text)) {
     await sendList(env);
+  } else if (/^\/clear_yes\b/.test(text)) {
+    await resetList(env);
+  } else if (/^\/(clear|reset|sbros)\b/.test(text)) {
+    await tg(env, "sendMessage", { chat_id: env.TELEGRAM_CHAT_ID, text: "Сбросить список заявок?\nПеред очисткой я пришлю итоговую таблицу со всеми заявками.\n\nПодтвердите: /clear_yes" });
   } else if (/^\/(start|help)\b/.test(text)) {
-    await tg(env, "sendMessage", { chat_id: env.TELEGRAM_CHAT_ID, text: "Новые заявки приходят сюда автоматически.\n/list — все заявки списком и таблицей." });
+    await tg(env, "sendMessage", { chat_id: env.TELEGRAM_CHAT_ID, text: "Новые заявки приходят сюда автоматически.\n/list — все заявки списком и таблицей\n/clear — сбросить список (начать заново)" });
   }
 }
 
@@ -130,7 +161,7 @@ async function pollTelegram(env) {
 // и добавляет /list в меню бота.
 async function handleSetup(env) {
   const del = await (await tg(env, "deleteWebhook", {})).json();
-  await tg(env, "setMyCommands", { commands: [{ command: "list", description: "Все заявки списком и таблицей" }] });
+  await tg(env, "setMyCommands", { commands: [{ command: "list", description: "Все заявки списком и таблицей" }, { command: "clear", description: "Сбросить список (начать заново)" }] });
   const ok = del.ok === true;
   const text = ok
     ? "Готово! Бот подключён. Напишите ему /list (ответ придёт в течение минуты)."
